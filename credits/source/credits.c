@@ -4,6 +4,8 @@
 #include <string.h>
 #include <fat.h>
 #include <ogc/machine/processor.h>
+#include <unistd.h>
+#include <sdcard/wiisd_io.h>
 
 #include "test.h"
 
@@ -129,6 +131,9 @@ int main(int argc, char **argv) {
 	printf("\n");
 	print_credit("byte[]", "For listening to my stupid~"
 							"ideas.");
+
+	printf("\n");
+	print_credit("Aep", "Support for SD cards");
 	
 	sleep(10);
 	for (int i = 0; i < column_size; i++) {
@@ -138,8 +143,8 @@ int main(int argc, char **argv) {
 	printf("\x1b[%d;%dH", column_size / 2, (row_size / 2) + 2);
 	printf("Thanks, from Fullmetal5");
 	// ffmpeg -i small_1621606.jpg -f rawvideo -pix_fmt yuyv422 test.bin
-#define IMG_WIDTH 202
-#define IMG_HEIGHT 202
+	#define IMG_WIDTH 202
+	#define IMG_HEIGHT 202
 	int off_x = (row_size / 2) * 8 - IMG_WIDTH - 2;
 	int off_y = (column_size / 2) * 16 - (IMG_HEIGHT / 2);
 	for (int i = 0; i < IMG_HEIGHT; i++)
@@ -151,23 +156,35 @@ int main(int argc, char **argv) {
 	}
 	printf("\x1b[2;0H");
 	
-	printf("Trying to init usb device\n");
+	printf("Trying to init SD card/USB drive\n");
 	
-	__io_usbstorage.startup();
-	
-	if (__io_usbstorage.isInserted() == 0) {
-		printf("No usb device detected!\n");
-		goto let_hang;
+	// Try to mount SD card first
+	// Bit messy.
+	char device[4];
+	__io_wiisd.startup();
+	if (__io_wiisd.isInserted() == 0 || fatMountSimple ("sd", &__io_wiisd) == 0) {
+		// If no SD card was inserted, then go back to the old solution of using the USB drive (Required for Wii mini)
+		printf("Failed to mount SD card, trying USB drive\n");
+
+		__io_usbstorage.startup();
+		if (__io_usbstorage.isInserted() == 0 || fatMountSimple ("fat", &__io_usbstorage) == 0) {
+			printf("Failed to mount USB drive!\n");
+			goto let_hang;
+		}
+		else {
+			strcpy(device, "fat");
+		}
+	}
+	else {
+		printf("Successfully mounted SD card!\n");
+		strcpy(device, "sd");
 	}
 	
-	printf("Trying to mount usb device\n");
-	
-	if (fatMountSimple ("fat", &__io_usbstorage) == 0) {
-		printf("Couldn't mount usb device\n");
-		goto let_hang;
-	}
-	
-	FILE* f = fopen("fat:/boot.elf", "rb");
+	char filepath[15];
+	printf("Attempting to load %s\n", filepath);
+	sprintf(filepath, "%s:/boot.elf", device);
+
+	FILE* f = fopen(filepath, "rb");
 	if (f == NULL) {
 		printf("boot.elf not found!\n");
 		goto let_hang;
